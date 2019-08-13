@@ -27,10 +27,10 @@ You can gather articles through Qiita API.
 https://qiita.com/api/v2/docs?locale=en
 
 ## Memo
-* Some methods are not implemented
+* Some methods are not implemented  
 Beam search and copy mechanism are not implemented.
 
-* GPU instance is recommended
+* GPU instance is recommended  
 `qiita_tag_prediction.ipynb` is tested on Google Colaboratory with GPU instance.   
 If you feel training is slow, please check instance type.
 
