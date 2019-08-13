@@ -1,3 +1,19 @@
+
+"""
+Script for downloading Qiita articles
+
+## Usage
+python qiita-api.py -auth_token <your_qiita_api_auth_token> -data_dir ./ -start_date 2019-01-01 -end_date 2019-02-01
+
+## Coding reference
+* Qiita API
+https://qiita.com/pocket_kyoto/items/64a5ae16f02023df883e
+
+* Tokenize
+http://tdual.hatenablog.com/entry/2018/04/09/133000
+https://ohke.hateblo.jp/entry/2017/11/02/230000
+
+"""
 import argparse
 import os
 import time
@@ -17,22 +33,6 @@ from janome.tokenizer import Tokenizer
 from urllib import request 
 
 from tqdm import tqdm
-
-
-"""
-## Usage
-python qiita-api.py -auth_token <your_qiita_api_auth_token> -data_dir ./ -start_date 2019-01-01 -end_date 2019-02-01
-
-## Coding reference
-* Qiita API
-https://qiita.com/pocket_kyoto/items/64a5ae16f02023df883e
-
-* Tokenize
-http://tdual.hatenablog.com/entry/2018/04/09/133000
-https://ohke.hateblo.jp/entry/2017/11/02/230000
-
-"""
-
 
 class NumericReplaceFilter(TokenFilter):
     def apply(self, tokens):
@@ -75,6 +75,7 @@ class Tokenizer_ntm:
         res = []
         for token in tokens:
             if token.base_form not in self.stopwords and token.part_of_speech.split(',')[1] not in self.exclude_posdetail:
+                # only base_form
                 res.append(token.base_form)
                 
         return res
@@ -116,17 +117,24 @@ def get_simple_df(df):
     return df
 
 def get_qiita_articles(opt):
+
     url = 'https://qiita.com/api/v2/items'
     h = {'Authorization': 'Bearer {}'.format(opt.auth_token)}
-    sleep_sec = 3.6 
+    
+    # Qiita API has a limitation of access frequency.
+    sleep_sec = 4
 
-    date_list = [d.strftime('%Y-%m-%d') for d in pd.date_range(opt.start_date, opt.end_date)]
-    start_list = date_list[:-2]
-    end_list = date_list[2:]
-
+    #date_list = [d.strftime('%Y-%m-%d') for d in pd.date_range(opt.start_date, opt.end_date)]
+    date_list = [d for d in pd.date_range(opt.start_date, opt.end_date)]
+    
+    # if you want articles written on day A, API query needs to be "created:> A-1 created:< A+1"
+    start_list = [(d - 1).strftime('%Y-%m-%d') for d in date_list]
+    end_list = [(d + 1).strftime('%Y-%m-%d') for d in date_list]
+    date_list = [d.strftime('%Y-%m-%d') for d in date_list]
+    
     df_list = []
 
-    for start, end in zip(start_list, end_list):
+    for start, end, day in zip(start_list, end_list, date_list):
         
         p = {
             "page" : 1,
@@ -134,7 +142,7 @@ def get_qiita_articles(opt):
             'query': 'created:>{} created:<{}'.format(start, end)
         }
 
-        print("date %s : page 1" % start)
+        print("date %s : page 1" % day)
         
         time.sleep(sleep_sec)
         
@@ -152,7 +160,7 @@ def get_qiita_articles(opt):
         if total_count > 100:
             for i in range(2, (total_count - 1) // 100 + 2):
                 p['page'] = i
-                print("date %s : page %s" % (start, i))
+                print("date %s : page %s" % (day, i))
                 time.sleep(sleep_sec) 
                 
                 r = requests.get(url, params=p, headers=h)
@@ -164,13 +172,16 @@ def get_qiita_articles(opt):
     return data
 
 
+def get_stopwords(urls, sw = None):
+    
+    stopwords = []
 
-def get_stopwords():
-    res = request.urlopen("http://svn.sourceforge.jp/svnroot/slothlib/CSharp/Version1/SlothLib/NLP/Filter/StopWord/word/Japanese.txt")
-    stopwords = [line.decode("utf-8").strip() for line in res]
-    res = request.urlopen("http://svn.sourceforge.jp/svnroot/slothlib/CSharp/Version1/SlothLib/NLP/Filter/StopWord/word/English.txt")
-    stopwords += [line.decode("utf-8").strip() for line in res]
-    stopwords += ['*', '&', '[', ']', ')', '(', '-',':','.','/','0', '...?', '——', '!【', '"', ')、', ')。', ')」']
+    for url in urls:
+        res = request.urlopen(url)
+        stopwords += [line.decode("utf-8").strip() for line in res]
+    
+    if sw is not None:
+        stopwords += sw 
 
     return stopwords
 
@@ -182,14 +193,17 @@ def main(opt):
     # filter. To keep quality, likes_count >=1
     mask = (data['likes_count'] >= 1)
 
-
     # downloading stopwords.
-    stopwords = get_stopwords()
+    urls = ["http://svn.sourceforge.jp/svnroot/slothlib/CSharp/Version1/SlothLib/NLP/Filter/StopWord/word/Japanese.txt",
+            "http://svn.sourceforge.jp/svnroot/slothlib/CSharp/Version1/SlothLib/NLP/Filter/StopWord/word/English.txt"]
+    sw = ['*', '&', '[', ']', ')', '(', '-',':','.','/','0', '...?', '——', '!【', '"', ')、', ')。', ')」']
+    stopwords = get_stopwords(urls, sw=sw)
     
     t_ntm = Tokenizer_ntm(stopwords=stopwords)
     t_txt = Tokenizer_txt()
 
     # Wakachigaki, Separating words, needs spesific tokenizer like janome and mecab.
+    # This process takes much time...
     bow = []
     text = []
     target = []
@@ -210,7 +224,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='qiita-api.py')
     
     parser.add_argument('-auth_token', help='Qiita API AUTH TOKEN', required=True) 
-    parser.add_argument('-data_dir', help='Directory for data save', required=True)
+    parser.add_argument('-data_dir', help='Directory for data saving', required=True)
     parser.add_argument('-start_date', required=True) 
     parser.add_argument('-end_date', required=True) 
     
